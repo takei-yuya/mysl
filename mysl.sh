@@ -112,9 +112,9 @@ function get_remote_file()
 
 # settings
 install_dir="`mktemp -d ${HOME}/.sl-tmp.XXXXXXXX`";
-bin_dir="${install_dir}/bin";
-lib_dir="${install_dir}/lib";
-include_dir="${install_dir}/include";
+bin_dir="${install_dir}/bin" && mkdir -p "${bin_dir}";
+lib_dir="${install_dir}/lib" && mkdir -p "${lib_dir}";
+include_dir="${install_dir}/include" && mkdir -p "${include_dir}";
 
 ncurses_url="http://ftp.gnu.org/pub/gnu/ncurses/ncurses-5.9.tar.gz";
 sl_url="http://www.tkl.iis.u-tokyo.ac.jp/~toyoda/sl/sl.tar";
@@ -147,16 +147,54 @@ export C_INCLUDE_PATH="${include_dir}:${C_INCLUDE_PATH}";
 export LIBRARY_PATH="${lib_dir}:${LIBRARY_PATH}";
 export PATH="${bin_dir}:${PATH}";
 
-# fetch ncurses
-cd "${install_dir}" || die;
-get_remote_file "${ncurses_url}" "${ncurses_file}" || die;
-tar -xzf "${ncurses_file}" || die;
+# check if ncurses is installed
+ncurses_tmp="${install_dir}/tmp";
+sl_CFLAGS=""
 
-# make and install ncurses
-cd "${ncurses_dir}" || die;
-./configure --prefix="${install_dir}" || die;
-make || die;
-make install || die;
+if [ -z "${sl_CFLAGS}" ]; then
+	cat <<-'HERE' | gcc -o ${ncurses_tmp} -lncurses -x c -
+#include <curses.h>
+
+int main()
+{
+	initscr();
+	endwin();
+	return 0;
+}
+	HERE
+	if [ -e "${ncurses_tmp}" ]; then
+		sl_CFLAGS="-Wall -O2"
+	fi
+fi
+
+if [ -z "${sl_CFLAGS}" ]; then
+	cat <<-'HERE' | gcc -o ${ncurses_tmp} -lncurses -x c -
+#include <ncurses/curses.h>
+
+int main()
+{
+	initscr();
+	endwin();
+	return 0;
+}
+	HERE
+	if [ -e "${ncurses_tmp}" ]; then
+		sl_CFLAGS="-Wall -O2 -DLINUX20"
+	fi
+fi
+
+if [ -z "${sl_CFLAGS}" ]; then
+	# fetch ncurses
+	cd "${install_dir}" || die;
+	get_remote_file "${ncurses_url}" "${ncurses_file}" || die;
+	tar -xzf "${ncurses_file}" || die;
+
+	# make and install ncurses
+	cd "${ncurses_dir}" || die;
+	./configure --prefix="${install_dir}" || die;
+	make || die;
+	make install || die;
+fi
 
 # fetch sl
 cd "${install_dir}" || die;
@@ -167,7 +205,7 @@ tar -xf "${sl_file}" || die;
 cd "${sl_dir}" || die;
 get_remote_file "${patch_url}" "${patch_file}" || die;
 patch -f < "${patch_file}" || die;
-make || die;
+CFLAGS="${ncurses_CFLAGS}" make -e || die;
 cp "${sl_dir}/sl" "${bin_dir}" || die;
 
 # make aliases
@@ -176,31 +214,37 @@ echo "export PATH=${bin_dir}" > "${bash_aliases}" || die;
 echo "export PATH=${bin_dir}" > "${zsh_aliases}" || die;
 echo "export PATH=${bin_dir}" > "${csh_aliases}" || die;
 PATHs="`echo ${PATH} | sed "s/:/ /g"`";
-for i in `find ${PATHs} -maxdepth 1 -type f ! -iname alias` exit logout unalias alias; do
+aliases_path="`find ${PATHs} -maxdepth 1 -type f ! -iname alias -exec basename {} \;`";
+aliases_bash="`bash --login -c alias | sed -e "s/^alias \([^=]*\).*$/\1/"`";
+aliases_csh="`csh -c alias | sed -e "s/^\([^	]*\).*$/\1/"`";
+aliases_zsh="`zsh -c alias | sed -e "s/^\([^=]*\).*$/\1/"`";
+aliases="${aliases_path} ${aliases_bash} ${aliases_csh} ${aliases_zsh} exit logout unalias alias";
+for i in ${aliases}; do
 	# alias of alias must be last
-	echo "\\\\alias '$(basename ${i})'='sl'" >> "${bash_aliases}" || die;
-	echo "\\\\alias '$(basename ${i})'='sl'" >> "${zsh_aliases}" || die;
-	echo "alias '$(basename ${i})' 'sl'" >> "${csh_aliases}" || die;
+	echo "make alias: ${i}";
+	echo "\\\\alias '${i}'='sl'" >> "${bash_aliases}" || die;
+	echo "\\\\alias '${i}'='sl'" >> "${zsh_aliases}" || die;
+	echo "alias '${i}' 'sl'" >> "${csh_aliases}" || die;
 done
 
 # make backup and inject sl
 if [ -f "${bashrc}" ]; then
 	cp "${bashrc}" "${install_dir}" || die;
-	sed -i"" -e "1i\\
+	sed -i "" -e "1i\\
 test -f ${bash_aliases} && source ${bash_aliases} && return\\
 " "${bashrc}" || die;
 fi
 
 if [ -f "${zshrc}" ]; then
 	cp "${zshrc}" "${install_dir}" || die;
-	sed -i"" -e "1i\\
+	sed -i "" -e "1i\\
 test -f ${zsh_aliases} && source ${zsh_aliases} && return\\
 " "${zshrc}" || die;
 fi
 
 if [ -f "${cshrc}" ]; then
 	cp "${cshrc}" "${install_dir}" || die;
-	sed -i"" -e "1i\\
+	sed -i "" -e "1i\\
 test -f ${csh_aliases} && source ${csh_aliases} && return\\
 " "${cshrc}" || die;
 fi
