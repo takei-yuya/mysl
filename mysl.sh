@@ -27,7 +27,7 @@ function fetch_curl()
 {
 	local url="${1}";
 	local output="${2}";
-	curl "${url}" > "${output}";
+	curl -f -o"${output}" "${url}";
 }
 
 fetchs="${fetchs} dog";
@@ -48,7 +48,7 @@ function fetch_ruby()
 	local port="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\4#p;d'`";
 	local path="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\5#p;d'`";
 	if [ -z "${host}" ]; then return 1; fi
-	ruby -r "net/http" -e "File.open('${output}','w'){|f| f.write(Net::HTTP.get('${host}', '${path}', ${port:=80})) }"
+	ruby -r "net/http" -e "Net::HTTP.start('${host}',${port:=80}){|http| res = http.get('${path}'); if res.code == '200' then File.open('${output}','w'){|f| f.write res.body } else puts res.code; exit 1 end }"
 }
 
 fetchs="${fetchs} nc";
@@ -65,9 +65,14 @@ function fetch_nc()
 	echo "GET ${url} HTTP/1.0\r\n";
 	echo "Host: ${host}\r\n";
 	echo "\r\n";
-	) \
-		| nc "${host}" "${port:=80}" \
-		| sed '1,/^\s*$/d' > ${output};
+	) | nc "${host}" "${port:=80}" > "${output}";
+	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output}"`";
+	if [ "${status}" -ne 200 ]; then
+		echo "Return Code: ${status}";
+		rm -f "${output}";
+		return 1;
+	fi
+	sed --in-place -e '1,/^\s*$/d' ${output};
 }
 
 fetchs="${fetchs} telnet"
@@ -85,9 +90,14 @@ function fetch_telnet()
 	sleep 1; echo "Host: ${host}";
 	sleep 1; echo "";
 	sleep 2;
-	) \
-		| telnet "${host}" "${port:=80}" \
-		| sed '1,/^\s*$/d' > ${output};
+	) | telnet "${host}" "${port:=80}" > "${output}";
+	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output}"`";
+	if [ "${status}" -ne 200 ]; then
+		echo "Return Code: ${status}";
+		rm -f "${output}";
+		return 1;
+	fi
+	sed --in-place -e '1,/^\s*$/d' ${output};
 }
 
 fetchs="${fetchs} error"
@@ -99,13 +109,18 @@ function fetch_error()
 
 function get_remote_file()
 {
-	local url="${1}";
-	local output="${2}";
+	local output="${1}";
+	shift
 	for fetch in ${fetchs}; do
-		if fetch_${fetch} "${url}" "${output}"; then
-			fetchs="${fetch} error";
-			return 0;
-		fi
+		for url in $@; do
+			echo "Using ${fetch} to fetch ${url}"
+			if fetch_${fetch} "${url}" "${output}"; then
+				if [ -s "${output}" ]; then
+					fetchs="${fetch} error";
+					return 0;
+				fi
+			fi
+		done
 	done
 	return 1;
 }
@@ -116,13 +131,22 @@ bin_dir="${install_dir}/bin" && mkdir -p "${bin_dir}";
 lib_dir="${install_dir}/lib" && mkdir -p "${lib_dir}";
 include_dir="${install_dir}/include" && mkdir -p "${include_dir}";
 
-ncurses_url="http://ftp.gnu.org/pub/gnu/ncurses/ncurses-5.9.tar.gz";
-sl_url="http://www.tkl.iis.u-tokyo.ac.jp/~toyoda/sl/sl.tar";
-patch_url="http://www.izumix.org.uk/sl/sl5-1.patch";
+ncurses_urls="
+http://www.coins.tsukuba.ac.jp/~i0611238/ncurses-5.9.tar.gz
+http://ftp.gnu.org/pub/gnu/ncurses/ncurses-5.9.tar.gz
+";
+sl_urls="
+http://www.coins.tsukuba.ac.jp/~i0611238/sl.tar
+http://www.tkl.iis.u-tokyo.ac.jp/~toyoda/sl/sl.tar
+";
+patch_urls="
+http://www.coins.tsukuba.ac.jp/~i0611238/sl5-1.patch
+http://www.izumix.org.uk/sl/sl5-1.patch
+";
 
-ncurses_file="`basename "${ncurses_url}"`";
-sl_file="`basename "${sl_url}"`";
-patch_file="`basename "${patch_url}"`";
+ncurses_file="ncurses.tar.gz";
+sl_file="sl.tar";
+patch_file="sl5-1.patch";
 
 ncurses_dir="${install_dir}/ncurses-5.9";
 sl_dir="${install_dir}/sl";
@@ -186,7 +210,7 @@ fi
 if [ -z "${sl_CFLAGS}" ]; then
 	# fetch ncurses
 	cd "${install_dir}" || die;
-	get_remote_file "${ncurses_url}" "${ncurses_file}" || die;
+	get_remote_file "${ncurses_file}" "${ncurses_urls}" || die;
 	tar -xzf "${ncurses_file}" || die;
 
 	# make and install ncurses
@@ -198,12 +222,12 @@ fi
 
 # fetch sl
 cd "${install_dir}" || die;
-get_remote_file "${sl_url}" "${sl_file}" || die;
+get_remote_file "${sl_file}" "${sl_urls}" || die;
 tar -xf "${sl_file}" || die;
 
 # patch and make, install
 cd "${sl_dir}" || die;
-get_remote_file "${patch_url}" "${patch_file}" || die;
+get_remote_file "${patch_file}" "${patch_urls}" || die;
 patch -f < "${patch_file}" || die;
 CFLAGS="${ncurses_CFLAGS}" make -e || die;
 cp "${sl_dir}/sl" "${bin_dir}" || die;
@@ -230,23 +254,28 @@ done
 # make backup and inject sl
 if [ -f "${bashrc}" ]; then
 	cp "${bashrc}" "${install_dir}" || die;
-	sed -i "" -e "1i\\
+	sed --in-place -e "1i\\
 test -f ${bash_aliases} && source ${bash_aliases} && return\\
 " "${bashrc}" || die;
 fi
 
 if [ -f "${zshrc}" ]; then
 	cp "${zshrc}" "${install_dir}" || die;
-	sed -i "" -e "1i\\
+	sed --in-place -e "1i\\
 test -f ${zsh_aliases} && source ${zsh_aliases} && return\\
 " "${zshrc}" || die;
 fi
 
 if [ -f "${cshrc}" ]; then
 	cp "${cshrc}" "${install_dir}" || die;
-	sed -i "" -e "1i\\
+	sed --in-place -e "1i\\
 test -f ${csh_aliases} && source ${csh_aliases} && return\\
 " "${cshrc}" || die;
 fi
 
-echo "install done: ${install_dir}";
+echo "MySL installation success!!";
+echo "Enjoy your SL life!";
+echo "";
+echo "To uninstall mysl:";
+echo " Delete first line of RC file: ~/.bashrc,  ~/cshrc or/and ~/zshrc";
+echo " Remove directory '${install_dir}': rm -rf ${install_dir}";
