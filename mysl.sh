@@ -72,7 +72,7 @@ function fetch_nc()
 		rm -f "${output}";
 		return 1;
 	fi
-	sed --in-place -e '1,/^\s*$/d' ${output};
+	sed -i ".mysl-bak" -e '1,/^\s*$/d' ${output};
 }
 
 fetchs="${fetchs} telnet"
@@ -97,7 +97,7 @@ function fetch_telnet()
 		rm -f "${output}";
 		return 1;
 	fi
-	sed --in-place -e '1,/^\s*$/d' ${output};
+	sed -i ".mysl-bak" -e '1,/^\s*$/d' ${output};
 }
 
 fetchs="${fetchs} error"
@@ -254,21 +254,21 @@ done
 # make backup and inject sl
 if [ -f "${bashrc}" ]; then
 	cp "${bashrc}" "${install_dir}" || die;
-	sed --in-place -e "1i\\
+	sed -i ".mysl-bak" -e "1i\\
 test -f ${bash_aliases} && source ${bash_aliases} && return\\
 " "${bashrc}" || die;
 fi
 
 if [ -f "${zshrc}" ]; then
 	cp "${zshrc}" "${install_dir}" || die;
-	sed --in-place -e "1i\\
+	sed -i ".mysl-bak" -e "1i\\
 test -f ${zsh_aliases} && source ${zsh_aliases} && return\\
 " "${zshrc}" || die;
 fi
 
 if [ -f "${cshrc}" ]; then
 	cp "${cshrc}" "${install_dir}" || die;
-	sed --in-place -e "1i\\
+	sed -i ".mysl-bak" -e "1i\\
 test -f ${csh_aliases} && source ${csh_aliases} && return\\
 " "${cshrc}" || die;
 fi
