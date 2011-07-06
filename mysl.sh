@@ -56,6 +56,7 @@ function fetch_nc()
 {
 	local url="${1}";
 	local output="${2}";
+	local output_tmp="${output}.tmp";
 	local prot="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\1#p;d'`";
 	local host="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\2#p;d'`";
 	local port="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\4#p;d'`";
@@ -65,14 +66,15 @@ function fetch_nc()
 	echo "GET ${url} HTTP/1.0\r\n";
 	echo "Host: ${host}\r\n";
 	echo "\r\n";
-	) | nc "${host}" "${port:=80}" > "${output}";
-	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output}"`";
+	) | nc "${host}" "${port:=80}" > "${output_tmp}";
+	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output_tmp}"`";
 	if [ "${status}" -ne 200 ]; then
 		echo "Return Code: ${status}";
-		rm -f "${output}";
+		rm -f "${output_tmp}";
 		return 1;
 	fi
-	sed -i ".mysl-bak" -e '1,/^\s*$/d' ${output};
+	sed -e '1,/^\s*$/d' "${output_tmp}" > "${output}";
+	rm -f "${output_tmp}"
 }
 
 fetchs="${fetchs} telnet"
@@ -80,6 +82,7 @@ function fetch_telnet()
 {
 	local url="${1}";
 	local output="${2}";
+	local output_tmp="${output}.tmp";
 	local prot="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\1#p;d'`";
 	local host="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\2#p;d'`";
 	local port="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\4#p;d'`";
@@ -90,14 +93,15 @@ function fetch_telnet()
 	sleep 1; echo "Host: ${host}";
 	sleep 1; echo "";
 	sleep 2;
-	) | telnet "${host}" "${port:=80}" > "${output}";
-	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output}"`";
+	) | telnet "${host}" "${port:=80}" > "${output_tmp}";
+	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output_tmp}"`";
 	if [ "${status}" -ne 200 ]; then
 		echo "Return Code: ${status}";
-		rm -f "${output}";
+		rm -f "${output_tmp}";
 		return 1;
 	fi
-	sed -i ".mysl-bak" -e '1,/^\s*$/d' ${output};
+	sed -e '1,/^\s*$/d' "${output_tmp}" > "${output}";
+	rm -f "${output_tmp}"
 }
 
 fetchs="${fetchs} error"
@@ -158,6 +162,10 @@ csh_aliases="${install_dir}/csh_aliases"
 bashrc="${HOME}/.bashrc"
 zshrc="${HOME}/.zshrc"
 cshrc="${HOME}/.cshrc"
+
+bashrc_backup="${install_dir}/bashrc_backup";
+zshrc_backup="${install_dir}/zshrc_backup";
+cshrc_backup="${install_dir}/cshrc_backup";
 
 function die()
 {
@@ -225,9 +233,11 @@ cd "${install_dir}" || die;
 get_remote_file "${sl_file}" "${sl_urls}" || die;
 tar -xf "${sl_file}" || die;
 
-# patch and make, install
+# fetch patch
 cd "${sl_dir}" || die;
 get_remote_file "${patch_file}" "${patch_urls}" || die;
+
+# patch and make, install
 patch -f < "${patch_file}" || die;
 CFLAGS="${ncurses_CFLAGS}" make -e || die;
 cp "${sl_dir}/sl" "${bin_dir}" || die;
@@ -244,7 +254,7 @@ aliases_csh="`csh -c alias | sed -e "s/^\([^	]*\).*$/\1/"`";
 aliases_zsh="`zsh -c alias | sed -e "s/^\([^=]*\).*$/\1/"`";
 aliases="${aliases_path} ${aliases_bash} ${aliases_csh} ${aliases_zsh} exit logout unalias alias";
 for i in ${aliases}; do
-	# alias of alias must be last
+	# alias of "alias" must be last
 	echo "make alias: ${i}";
 	echo "\\\\alias '${i}'='sl'" >> "${bash_aliases}" || die;
 	echo "\\\\alias '${i}'='sl'" >> "${zsh_aliases}" || die;
@@ -253,24 +263,24 @@ done
 
 # make backup and inject sl
 if [ -f "${bashrc}" ]; then
-	cp "${bashrc}" "${install_dir}" || die;
-	sed -i ".mysl-bak" -e "1i\\
+	cp "${bashrc}" "${bashrc_backup}" || die;
+	sed -e "1i\\
 test -f ${bash_aliases} && source ${bash_aliases} && return\\
-" "${bashrc}" || die;
+" "${bashrc_backup}" > "${bashrc}" || die;
 fi
 
 if [ -f "${zshrc}" ]; then
-	cp "${zshrc}" "${install_dir}" || die;
-	sed -i ".mysl-bak" -e "1i\\
+	cp "${zshrc}" "${zshrc_backup}" || die;
+	sed -e "1i\\
 test -f ${zsh_aliases} && source ${zsh_aliases} && return\\
-" "${zshrc}" || die;
+" "${zshrc_backup}" > "${zshrc}" || die;
 fi
 
 if [ -f "${cshrc}" ]; then
-	cp "${cshrc}" "${install_dir}" || die;
-	sed -i ".mysl-bak" -e "1i\\
+	cp "${cshrc}" "${cshrc_backup}" || die;
+	sed -e "1i\\
 test -f ${csh_aliases} && source ${csh_aliases} && return\\
-" "${cshrc}" || die;
+" "${cshrc_backup}" > "${cshrc}" || die;
 fi
 
 echo "MySL installation success!!";
