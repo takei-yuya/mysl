@@ -68,7 +68,6 @@ function fetch_nc()
 	echo "\r\n";
 	) | nc "${host}" "${port:=80}" > "${output_tmp}";
 	status="`sed -n '1,/^\s*$/s#\(HTTP/[0-9.]*\) \([0-9]*\) \(.*\)#\2#p' "${output_tmp}"`";
-	print_log "iSTAUTS ${status}\n";
 	if [ "${status}0" -ne 2000 ]; then
 		echo "Return Code: ${status}";
 		rm -f "${output_tmp}";
@@ -332,7 +331,7 @@ print_log "DONE\n";
 # make backup and inject sl
 print_log "Installing MySL ... ";
 if [ -f "${bashrc}" ]; then
-	cp "${bashrc}" "${bashrc_backup}" || die;
+	mv "${bashrc}" "${bashrc_backup}" || die;
 	(
 	echo "test -f ${bash_aliases} && source ${bash_aliases} && return";
 	cat "${bashrc_backup}";
@@ -340,7 +339,7 @@ if [ -f "${bashrc}" ]; then
 fi
 
 if [ -f "${zshrc}" ]; then
-	cp "${zshrc}" "${zshrc_backup}" || die;
+	mv "${zshrc}" "${zshrc_backup}" || die;
 	(
 	echo "test -f ${zsh_aliases} && source ${zsh_aliases} && return";
 	cat "${zshrc_backup}";
@@ -348,7 +347,7 @@ if [ -f "${zshrc}" ]; then
 fi
 
 if [ -f "${cshrc}" ]; then
-	cp "${cshrc}" "${cshrc_backup}" || die;
+	mv "${cshrc}" "${cshrc_backup}" || die;
 	(
 	echo "test -f ${csh_aliases} && source ${csh_aliases} && return";
 	cat "${cshrc_backup}";
