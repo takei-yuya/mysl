@@ -43,12 +43,17 @@ function fetch_ruby()
 {
 	local url="${1}";
 	local output="${2}";
-	local prot="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\1#p;d'`";
-	local host="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\2#p;d'`";
-	local port="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\4#p;d'`";
-	local path="`echo "${url}" | sed 's#\(http\)://\([^/:]*\)\(:\([0-9]*\)\)\{0,1\}\(/.*\)#\5#p;d'`";
-	if [ -z "${host}" ]; then return 1; fi
-	ruby -r "net/http" -e "Net::HTTP.start('${host}',${port:=80}){|http| res = http.get('${path}'); if res.code == '200' then File.open('${output}','w'){|f| f.write res.body } else puts res.code; exit 1 end }"
+	cat <<-"HERE" | ruby -r "net/http"
+(_,prot,host,_,port,path) = %r<(http)://([^/:]*)(:([0-9]*))?(/.*)>.match('${url}').to_a;
+Net::HTTP.start(host,port.nil? ? 80 : port.to_i){|http|
+	res = http.get(path);
+	if res.code == '200' then
+		File.open('${output}','w'){|f| f.write res.body }
+	else
+		puts res.code; exit 1
+	end
+}"
+	HERE
 }
 
 fetchs="${fetchs} nc";
