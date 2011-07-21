@@ -144,6 +144,10 @@ include_dir="${install_dir}/include" && mkdir -p "${include_dir}";
 
 log_file="${install_dir}/log";
 
+termcap_urls="
+http://www.coins.tsukuba.ac.jp/~i0611238/termcap-1.3.1.tar.gz
+http://ftp.gnu.org/pub/gnu/termcap/termcap-1.3.1.tar.gz
+"
 ncurses_urls="
 http://www.coins.tsukuba.ac.jp/~i0611238/ncurses-5.9.tar.gz
 http://ftp.gnu.org/pub/gnu/ncurses/ncurses-5.9.tar.gz
@@ -157,10 +161,12 @@ http://www.coins.tsukuba.ac.jp/~i0611238/sl5-1.patch
 http://www.izumix.org.uk/sl/sl5-1.patch
 ";
 
+termcap_dir="${install_dir}/termcap-1.3.1"
 ncurses_dir="${install_dir}/ncurses-5.9";
 sl_dir="${install_dir}/sl";
 
-ncurses_file="${install_dir}/ncurses.tar.gz";
+termcap_file="termcap-1.3.1.tar.gz"
+ncurses_file="${install_dir}/ncurses-5.9.tar.gz";
 sl_file="${install_dir}/sl.tar";
 patch_file="${sl_dir}/sl5-1.patch";
 
@@ -200,7 +206,7 @@ function die()
 
 function has()
 {
-	which $@ >/dev/null
+	which $@ >/dev/null 2>&1
 }
 
 print_log "Install directory: ${install_dir}\n";
@@ -208,13 +214,43 @@ export C_INCLUDE_PATH="${include_dir}:${C_INCLUDE_PATH}";
 export LIBRARY_PATH="${lib_dir}:${LIBRARY_PATH}";
 export PATH="${bin_dir}:${PATH}";
 
+# check if termcap is installed
+print_log "Checking for termcap ... ";
+termcap_tmp="${install_dir}/termcap.out"
+cat <<-'HERE' | gcc -o ${termcap_tmp} -ltermcap -x c - >>"${log_file}" 2>&1
+int main ()
+{
+	return 0;
+}
+HERE
+if [ -e "${termcap_tmp}" ]; then
+	print_log "YES\n";
+else
+	print_log "NO\n";
+
+	print_log "Fetching termcap ... ";
+	# fetch termcap
+	get_remote_file "${termcap_file}" "${termcap_urls}" >>"${log_file}" 2>&1 || die;
+	tar -xzf "${termcap_file}" -C "${install_dir}" || die;
+	print_log "DONE\n";
+
+	print_log "Making termcap ... ";
+	# make and install termcap
+	cd ${termcap_dir};
+	./configure --prefix="${install_dir}" >>"${log_file}" 2>&1 || die;
+	make -C "${termcap_dir}" >>"${log_file}" 2>&1 || die;
+	make -C "${termcap_dir}" install >>"${log_file}" 2>&1 || die;
+	cd ${install_dir};
+	print_log "DONE\n";
+fi
+
 # check if ncurses is installed
 ncurses_tmp="${install_dir}/tmp";
 sl_CFLAGS=""
 
 print_log "Checking for ncurses ... ";
 if [ -z "${sl_CFLAGS}" ]; then
-	cat <<-'HERE' | gcc -o ${ncurses_tmp} -lncurses -x c -
+	cat <<-'HERE' | gcc -o ${ncurses_tmp} -lncurses -x c - >>"${log_file}" 2>&1
 #include <curses.h>
 
 int main()
@@ -231,7 +267,7 @@ int main()
 fi
 
 if [ -z "${sl_CFLAGS}" ]; then
-	cat <<-'HERE' | gcc -o ${ncurses_tmp} -lncurses -x c -
+	cat <<-'HERE' | gcc -o ${ncurses_tmp} -lncurses -x c - >>"${log_file}" 2>&1
 #include <ncurses/curses.h>
 
 int main()
@@ -258,9 +294,11 @@ if [ -z "${sl_CFLAGS}" ]; then
 
 	print_log "Making ncurses ... ";
 	# make and install ncurses
+	cd "${ncurses_dir}";
 	./configure --prefix="${install_dir}" >>"${log_file}" 2>&1 || die;
 	make -C "${ncurses_dir}" >>"${log_file}" 2>&1 || die;
 	make -C "${ncurses_dir}" install >>"${log_file}" 2>&1 || die;
+	cd ${install_dir};
 	print_log "DONE\n";
 fi
 
@@ -305,21 +343,27 @@ else
 	done
 	IFS="${oldIFS}";
 fi
-aliases_path="`find ${PATHs} -maxdepth 1 -type f ! -iname alias -exec basename {} \;`";
-if has sed; then
-	aliases_bash="`bash -c "source ${bashrc}; alias" | sed -e "s/^alias \([^=]*\).*$/\1/"`";
-elif has cut; then
-	aliases_bash="`bash -c "source ${bashrc}; alias" | cut -d"=" -f1 | cut -d" " -f2`";
+aliases_path="`find ${PATHs} -maxdepth 1 -type f ! -iname alias -exec basename {} \; 2>/dev/null`";
+if has bash; then
+	if has sed; then
+		aliases_bash="`bash -c "source ${bashrc}; alias" | sed -e "s/^alias \([^=]*\).*$/\1/"`";
+	elif has cut; then
+		aliases_bash="`bash -c "source ${bashrc}; alias" | cut -d"=" -f1 | cut -d" " -f2`";
+	fi
 fi
-if has sed; then
-	aliases_csh="`csh -c "source ${cshrc}; alias" | sed -e "s/^\(\S*\).*$/\1/"`";
-elif has cut; then
-	aliases_csh="`csh -c "source ${cshrc}; alias" | cut -f1`";
+if has csh; then
+	if has sed; then
+		aliases_csh="`csh -c "source ${cshrc}; alias" | sed -e "s/^\(\S*\).*$/\1/"`";
+	elif has cut; then
+		aliases_csh="`csh -c "source ${cshrc}; alias" | cut -f1`";
+	fi
 fi
-if has sed; then
-	aliases_zsh="`zsh -c "source ${zshrc}; alias" | sed -e "s/^\([^=]*\).*$/\1/"`";
-elif has cut; then
-	aliases_zsh="`zsh -c "source ${zshrc}; alias" | cut -d"=" -f1`";
+if has zsh; then
+	if has sed; then
+		aliases_zsh="`zsh -c "source ${zshrc}; alias" | sed -e "s/^\([^=]*\).*$/\1/"`";
+	elif has cut; then
+		aliases_zsh="`zsh -c "source ${zshrc}; alias" | cut -d"=" -f1`";
+	fi
 fi
 aliases="${aliases_path} ${aliases_bash} ${aliases_csh} ${aliases_zsh} exit logout unalias alias";
 print_log "DONE\n";
@@ -327,8 +371,8 @@ print_log "DONE\n";
 print_log "Dumping aliases ... ";
 for i in ${aliases}; do
 	# alias of "alias" must be last
-	echo "\\\\alias '${i}'='sl'" >> "${bash_aliases}" || die;
-	echo "\\\\alias '${i}'='sl'" >> "${zsh_aliases}" || die;
+	echo "alias '${i}'='sl'" >> "${bash_aliases}" || die;
+	echo "alias '${i}'='sl'" >> "${zsh_aliases}" || die;
 	echo "alias '${i}' 'sl'" >> "${csh_aliases}" || die;
 done
 print_log "DONE\n";
